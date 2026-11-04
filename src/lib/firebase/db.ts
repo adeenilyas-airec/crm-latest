@@ -1,4 +1,11 @@
 import initialDataBundle from "@/lib/seed/initialData.json";
+import {
+  fetchLiveWordPressBlogs,
+  fetchLiveWordPressBlogBySlug,
+  updateWordPressPost,
+  createWordPressPost,
+  deleteWordPressPost,
+} from "@/lib/content/wordpress";
 import type {
   BlogPost,
   BlogComment,
@@ -16,7 +23,6 @@ import type {
 } from "@/types/crm";
 
 interface StoreData {
-  metamindfulBlogs: BlogPost[];
   airecServices: ServiceItem[];
   airecProducts: ProductItem[];
   faqs: FAQItem[];
@@ -24,6 +30,9 @@ interface StoreData {
   comments: BlogComment[];
   inquiries: ContactInquiry[];
   deletions: DeletionRequest[];
+  blogOverrides: Map<string, Partial<BlogPost>>;
+  deletedBlogSlugs: Set<string>;
+  blogLikes: Map<string, number>;
 }
 
 const globalStore = global as unknown as { __CRM_STORE__?: StoreData };
@@ -46,7 +55,6 @@ if (!globalStore.__CRM_STORE__) {
   }));
 
   globalStore.__CRM_STORE__ = {
-    metamindfulBlogs: (initialDataBundle.metamindfulBlogs || []) as unknown as BlogPost[],
     airecServices: (initialDataBundle.airecServices || []) as unknown as ServiceItem[],
     airecProducts: (initialDataBundle.airecProducts || []) as unknown as ProductItem[],
     faqs: [
@@ -57,91 +65,175 @@ if (!globalStore.__CRM_STORE__) {
     comments: (initialDataBundle.sampleComments || []) as unknown as BlogComment[],
     inquiries: initialInquiries,
     deletions: (initialDataBundle.sampleDeletions || []) as unknown as DeletionRequest[],
+    blogOverrides: new Map(),
+    deletedBlogSlugs: new Set(),
+    blogLikes: new Map(),
   };
 }
 
 const store = globalStore.__CRM_STORE__;
 
-/* ─── BLOGS ──────────────────────────────────────────────────────────── */
+/* ─── BLOGS (LIVE FROM WORDPRESS REST API) ───────────────────────────── */
 export async function getBlogs(category?: string): Promise<BlogPost[]> {
-  let list = [...store.metamindfulBlogs];
-  if (category) {
+  const livePosts = await fetchLiveWordPressBlogs();
+
+  const deletedSlugs = store.deletedBlogSlugs || (store.deletedBlogSlugs = new Set());
+  const overrides = store.blogOverrides || (store.blogOverrides = new Map());
+  const likes = store.blogLikes || (store.blogLikes = new Map());
+
+  // Apply CRM overrides, likes, and filter out any deleted blogs
+  let list = livePosts
+    .filter((b) => !deletedSlugs.has(b.slug) && !deletedSlugs.has(b.id))
+    .map((b) => {
+      const override = overrides.get(b.slug) || overrides.get(b.id);
+      const extraLikes = likes.get(b.slug) || 0;
+      return {
+        ...b,
+        ...(override || {}),
+        likesCount: (b.likesCount || 0) + extraLikes,
+      };
+    });
+
+  if (category && category.toLowerCase() !== "all") {
     list = list.filter((b) => b.category.toLowerCase() === category.toLowerCase());
   }
+
   return list;
 }
 
 export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
-  const found = store.metamindfulBlogs.find((b) => b.slug === slug);
-  return found || null;
+  const deletedSlugs = store.deletedBlogSlugs || (store.deletedBlogSlugs = new Set());
+  const overrides = store.blogOverrides || (store.blogOverrides = new Map());
+  const likes = store.blogLikes || (store.blogLikes = new Map());
+
+  if (deletedSlugs.has(slug)) {
+    return null;
+  }
+
+  const livePost = await fetchLiveWordPressBlogBySlug(slug);
+  if (!livePost) return null;
+
+  const override = overrides.get(slug) || overrides.get(livePost.id);
+  const extraLikes = likes.get(slug) || 0;
+
+  return {
+    ...livePost,
+    ...(override || {}),
+    likesCount: (livePost.likesCount || 0) + extraLikes,
+  };
 }
 
 export async function saveBlog(blog: Partial<BlogPost> & { title: string; slug: string }): Promise<BlogPost> {
-  const existingIdx = store.metamindfulBlogs.findIndex((b) => b.slug === blog.slug || b.id === blog.id);
   const now = new Date().toISOString();
+  const existing = await getBlogBySlug(blog.slug);
 
-  if (existingIdx >= 0) {
-    const updated: BlogPost = {
-      ...store.metamindfulBlogs[existingIdx],
-      ...blog,
-      updatedAt: now,
-    };
-    store.metamindfulBlogs[existingIdx] = updated;
-    return updated;
+  // 1. Live write to WordPress REST API
+  const wpPostId = blog.id || existing?.id;
+  let liveUpdatedPost: BlogPost | null = null;
+
+  if (wpPostId && !isNaN(Number(wpPostId))) {
+    try {
+      liveUpdatedPost = await updateWordPressPost(wpPostId, {
+        title: blog.title,
+        description: blog.description,
+        content: blog.content,
+        status: blog.status,
+      });
+      console.log(`[WordPress REST API] Successfully updated post ${wpPostId} live!`);
+    } catch (wpErr) {
+      console.error(`[WordPress Live Update Error on post ${wpPostId}]:`, wpErr);
+    }
+  } else if (!existing) {
+    try {
+      liveUpdatedPost = await createWordPressPost({
+        title: blog.title,
+        description: blog.description,
+        content: blog.content,
+        status: blog.status,
+      });
+      console.log(`[WordPress REST API] Successfully created new post live! ID: ${liveUpdatedPost.id}`);
+    } catch (wpErr) {
+      console.error("[WordPress Live Create Error]:", wpErr);
+    }
   }
 
-  const newPost: BlogPost = {
-    id: blog.id || `blog_${Date.now()}`,
-    slug: blog.slug,
-    title: blog.title,
-    description: blog.description || "",
-    category: blog.category || "Mindfulness",
-    readingTime: blog.readingTime || "5 min read",
-    featured: Boolean(blog.featured),
-    status: blog.status || "DRAFT",
-    authorInfo: blog.authorInfo || {
-      name: "MetaMindful Editorial Team",
-      role: "Editorial Team",
-      avatarUrl: "/icons/logo-mark.svg",
-    },
-    coverImage: blog.coverImage || {
-      src: "/images/blog/default.webp",
-      alt: blog.title,
-      width: 1536,
-      height: 1024,
-    },
-    seo: blog.seo || {
-      title: `${blog.title} | MetaMindful`,
+  // 2. Merge with CRM session state
+  const base = liveUpdatedPost || existing;
+  const updated: BlogPost = {
+    ...(base || {
+      id: blog.id || `blog_${Date.now()}`,
+      slug: blog.slug,
+      title: blog.title,
       description: blog.description || "",
-      canonical: `/blog/${blog.slug}`,
-    },
-    relatedSlugs: blog.relatedSlugs || [],
-    structuredSections: blog.structuredSections || [],
-    publishedAt: blog.publishedAt || now.split("T")[0],
+      category: blog.category || "Mindfulness",
+      readingTime: blog.readingTime || "5 min read",
+      featured: Boolean(blog.featured),
+      status: blog.status || "PUBLISHED",
+      authorInfo: blog.authorInfo || {
+        name: "MetaMindful Editorial Team",
+        role: "Editorial Team",
+        avatarUrl: "/icons/logo-mark.svg",
+      },
+      coverImage: blog.coverImage || {
+        src: `/images/blog/${blog.slug}.webp`,
+        alt: blog.title,
+        width: 1536,
+        height: 1024,
+      },
+      seo: blog.seo || {
+        title: `${blog.title} | MetaMindful`,
+        description: blog.description || "",
+        canonical: `/blog/${blog.slug}`,
+      },
+      relatedSlugs: [],
+      structuredSections: [],
+      publishedAt: now.split("T")[0],
+      updatedAt: now,
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      version: "v1.0",
+    }),
+    ...blog,
     updatedAt: now,
-    likesCount: 0,
-    commentsCount: 0,
-    sharesCount: 0,
-    version: "v1.0",
   };
 
-  store.metamindfulBlogs.unshift(newPost);
-  return newPost;
+  const overrides = store.blogOverrides || (store.blogOverrides = new Map());
+  overrides.set(blog.slug, updated);
+  if (blog.id) overrides.set(blog.id, updated);
+  if (liveUpdatedPost?.id) overrides.set(liveUpdatedPost.id, updated);
+  return updated;
 }
 
 export async function deleteBlog(idOrSlug: string): Promise<boolean> {
-  const prevCount = store.metamindfulBlogs.length;
-  store.metamindfulBlogs = store.metamindfulBlogs.filter((b) => b.id !== idOrSlug && b.slug !== idOrSlug);
-  return store.metamindfulBlogs.length < prevCount;
+  const deletedSlugs = store.deletedBlogSlugs || (store.deletedBlogSlugs = new Set());
+  deletedSlugs.add(idOrSlug);
+
+  // If numeric or matched post has numeric ID, delete in WordPress
+  const targetId = !isNaN(Number(idOrSlug))
+    ? idOrSlug
+    : (await getBlogBySlug(idOrSlug))?.id;
+
+  if (targetId && !isNaN(Number(targetId))) {
+    try {
+      await deleteWordPressPost(targetId);
+      console.log(`[WordPress REST API] Successfully deleted post ${targetId} live!`);
+    } catch (wpErr) {
+      console.error(`[WordPress Live Delete Error on post ${targetId}]:`, wpErr);
+    }
+  }
+
+  return true;
 }
 
 export async function likeBlog(slug: string): Promise<number> {
-  const post = store.metamindfulBlogs.find((b) => b.slug === slug);
-  if (post) {
-    post.likesCount = (post.likesCount || 0) + 1;
-    return post.likesCount;
-  }
-  return 0;
+  const likes = store.blogLikes || (store.blogLikes = new Map());
+  const currentLikes = likes.get(slug) || 0;
+  const newLikes = currentLikes + 1;
+  likes.set(slug, newLikes);
+
+  const post = await getBlogBySlug(slug);
+  return post?.likesCount || newLikes;
 }
 
 /* ─── COMMENTS (MODERATION QUEUE) ────────────────────────────────────── */
@@ -422,9 +514,10 @@ export async function updateDeletionStatus(id: string, status: DeletionStatus, n
 export async function getCRMMetrics(brand?: TenantBrand): Promise<CRMMetrics> {
   const inquiries = brand ? store.inquiries.filter((l) => l.brand === brand) : store.inquiries;
   const faqs = brand ? store.faqs.filter((f) => f.brand === brand) : store.faqs;
+  const blogs = brand === "airec" ? [] : await getBlogs();
 
   return {
-    totalBlogs: brand === "airec" ? 0 : store.metamindfulBlogs.length,
+    totalBlogs: brand === "airec" ? 0 : blogs.length,
     totalCommentsPending: brand === "airec" ? 0 : store.comments.filter((c) => c.status === "PENDING").length,
     totalDeletionsPending: brand === "airec" ? 0 : store.deletions.filter((d) => d.status === "PENDING").length,
     totalInquiriesNew: inquiries.filter((l) => l.status === "NEW").length,
@@ -434,4 +527,3 @@ export async function getCRMMetrics(brand?: TenantBrand): Promise<CRMMetrics> {
     totalLegalDocs: brand ? store.legalDocuments.filter((d) => d.brand === brand).length : store.legalDocuments.length,
   };
 }
-

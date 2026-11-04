@@ -3,6 +3,7 @@ import { getBlogs, saveBlog } from "@/lib/firebase/db";
 import { z } from "zod";
 
 const blogSchema = z.object({
+  id: z.string().optional(),
   title: z.string().min(3),
   slug: z.string().min(3),
   description: z.string().optional(),
@@ -10,6 +11,7 @@ const blogSchema = z.object({
   readingTime: z.string().optional(),
   featured: z.boolean().optional(),
   status: z.enum(["DRAFT", "IN_REVIEW", "PUBLISHED", "ARCHIVED"]).optional(),
+  content: z.string().optional(),
   seo: z.object({
     title: z.string(),
     description: z.string(),

@@ -50,7 +50,7 @@ export function BlogsView({ blogs, onSaveBlog, onLikeBlog }: BlogsViewProps) {
         <div className="w-full sm:w-80">
           <input
             type="text"
-            placeholder="Search 21 MetaMindful articles..."
+            placeholder={`Search ${blogs.length || 21} MetaMindful articles...`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-[#FAFDFF] border border-[#E4E7EC] rounded-[11px] px-3.5 py-2 text-xs text-[#161525] placeholder-[#98A2B3] focus:outline-none focus:border-[#159CF0] focus:ring-2 focus:ring-[#159CF0]/15 transition-all"
