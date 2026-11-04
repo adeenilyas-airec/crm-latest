@@ -157,6 +157,20 @@ export async function saveBlog(blog: Partial<BlogPost> & { title: string; slug: 
     }
   }
 
+  // Trigger instant on-demand revalidation on deployed MetaMindful website
+  try {
+    const mmUrl = process.env.METAMINDFUL_SITE_URL || "https://metamindful-latest.vercel.app";
+    const secret = process.env.REVALIDATION_SECRET || "metamindful_crm_sync_secret_2026";
+    fetch(`${mmUrl}/api/revalidate?secret=${secret}&slug=${encodeURIComponent(blog.slug)}`, {
+      method: "POST",
+    })
+      .then((r) => r.json())
+      .then((res) => console.log(`[MetaMindful Revalidation] Purged cache on ${mmUrl}:`, res))
+      .catch((err) => console.warn(`[MetaMindful Revalidation Notice]:`, err.message));
+  } catch (revalErr) {
+    console.warn("[Revalidation Error]:", revalErr);
+  }
+
   // 2. Merge with CRM session state
   const base = liveUpdatedPost || existing;
   const updated: BlogPost = {
@@ -218,6 +232,12 @@ export async function deleteBlog(idOrSlug: string): Promise<boolean> {
     try {
       await deleteWordPressPost(targetId);
       console.log(`[WordPress REST API] Successfully deleted post ${targetId} live!`);
+
+      const mmUrl = process.env.METAMINDFUL_SITE_URL || "https://metamindful-latest.vercel.app";
+      const secret = process.env.REVALIDATION_SECRET || "metamindful_crm_sync_secret_2026";
+      fetch(`${mmUrl}/api/revalidate?secret=${secret}&slug=${encodeURIComponent(idOrSlug)}`, {
+        method: "POST",
+      }).catch(() => null);
     } catch (wpErr) {
       console.error(`[WordPress Live Delete Error on post ${targetId}]:`, wpErr);
     }
