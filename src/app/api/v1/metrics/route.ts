@@ -1,4 +1,3 @@
-export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getCRMMetrics } from "@/lib/firebase/db";
 import type { TenantBrand } from "@/types/crm";
@@ -9,7 +8,8 @@ export async function GET(req: Request) {
     const brand = searchParams.get("brand") as TenantBrand | null;
     const metrics = await getCRMMetrics(brand || undefined);
     return NextResponse.json({ success: true, metrics });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.digest === "NEXT_PRERENDER_INTERRUPTED") throw error;
     console.error("[API Metrics Error]", error);
     return NextResponse.json({ success: false, error: "Failed to fetch metrics" }, { status: 500 });
   }

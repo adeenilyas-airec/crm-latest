@@ -1,4 +1,3 @@
-export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getLegalDocuments, getLegalDocument, saveLegalDocument } from "@/lib/firebase/db";
 

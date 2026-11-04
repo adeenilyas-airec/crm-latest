@@ -1,4 +1,3 @@
-export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getFaqs, saveFaq, deleteFaq } from "@/lib/firebase/db";
 import { z } from "zod";
