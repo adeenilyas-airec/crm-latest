@@ -81,18 +81,18 @@ export function mapWordPressPostToBlogPost(
   const rawDate = wpPost.date;
   const publishedAt = rawDate
     ? new Date(rawDate).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
     : "Recently Published";
 
   const updatedAt = wpPost.modified
     ? new Date(wpPost.modified).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
     : undefined;
 
   // Clean HTML Content directly from WordPress
@@ -183,7 +183,7 @@ export function mapWordPressPostToBlogPost(
  * Fetches all published blog posts live from WordPress REST API.
  * Uses a 60-second in-memory cache to ensure fast responses and resilience.
  */
-export async function fetchLiveWordPressBlogs(forceRefresh = false): Promise<BlogPost[]> {
+export async function fetchLiveWordPressBlogs(forceRefresh = true): Promise<BlogPost[]> {
   const now = Date.now();
   if (
     !forceRefresh &&
@@ -195,8 +195,11 @@ export async function fetchLiveWordPressBlogs(forceRefresh = false): Promise<Blo
 
   try {
     const res = await fetch(`${WP_API_BASE}/posts?per_page=100&_embed`, {
-      headers: { Accept: "application/json" },
-      next: { revalidate: 60 },
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache",
+      },
+      cache: "no-store",
     });
 
     if (!res.ok) {
@@ -229,8 +232,11 @@ export async function fetchLiveWordPressBlogBySlug(slug: string): Promise<BlogPo
     const res = await fetch(
       `${WP_API_BASE}/posts?slug=${encodeURIComponent(slug)}&_embed`,
       {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 60 },
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache",
+        },
+        cache: "no-store",
       }
     );
 
@@ -300,6 +306,7 @@ export async function updateWordPressPost(
   const updatedPost = mapWordPressPostToBlogPost(updatedRaw, 0);
 
   // Update memory cache immediately
+  lastFetchTimestamp = 0;
   const idx = memoryPostsCache.findIndex(
     (p) => p.id === String(postId) || p.slug === updatedPost.slug
   );

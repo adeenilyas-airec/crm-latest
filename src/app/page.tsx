@@ -67,7 +67,7 @@ export default function CRMMainPage() {
         inquiriesRes,
       ] = await Promise.all([
         fetch(`/api/v1/metrics?brand=${brand}`).then((r) => r.json()).catch(() => null),
-        fetch("/api/v1/content/blogs").then((r) => r.json()).catch(() => null),
+        fetch("/api/v1/content/blogs", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
         fetch("/api/v1/interactions/comments").then((r) => r.json()).catch(() => null),
         fetch("/api/v1/compliance/delete-account").then((r) => r.json()).catch(() => null),
         fetch("/api/v1/content/services").then((r) => r.json()).catch(() => null),
@@ -156,12 +156,25 @@ export default function CRMMainPage() {
 
   // Handlers
   const handleSaveBlog = async (blog: Partial<BlogPost> & { title: string; slug: string }) => {
+    // Optimistically update table immediately
+    setBlogs((prev) =>
+      prev.map((b) => (b.slug === blog.slug || (blog.id && b.id === blog.id) ? { ...b, ...blog } : b))
+    );
+
     const res = await fetch("/api/v1/content/blogs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(blog),
     });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      const result = await res.json().catch(() => null);
+      if (result?.data) {
+        setBlogs((prev) =>
+          prev.map((b) => (b.slug === result.data.slug || b.id === result.data.id ? { ...b, ...result.data } : b))
+        );
+      }
+      fetchData();
+    }
   };
 
   const handleLikeBlog = async (slug: string) => {
@@ -221,7 +234,9 @@ export default function CRMMainPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(service),
     });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    }
   };
 
   const handleSaveProduct = async (product: ProductItem) => {
@@ -234,7 +249,9 @@ export default function CRMMainPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(faq),
     });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    }
   };
 
   const handleDeleteFaq = async (id: string) => {
@@ -253,7 +270,9 @@ export default function CRMMainPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc),
     });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    }
   };
 
   const handleUpdateInquiryStatus = async (id: string, status: InquiryStatus, notes?: string) => {
