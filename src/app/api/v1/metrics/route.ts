@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getCRMMetrics } from "@/lib/firebase/db";
 import type { TenantBrand } from "@/types/crm";

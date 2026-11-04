@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServices, saveService } from "@/lib/firebase/db";
 import { z } from "zod";
