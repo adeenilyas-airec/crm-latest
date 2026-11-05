@@ -10,7 +10,7 @@ export function getDbPool(): Pool {
   if (!pool) {
     const databaseUrl =
       process.env.DATABASE_URL ||
-      "postgresql://postgres:postgres@localhost:5432/metamindful";
+      "postgresql://postgres:root@localhost:5432/metamindful";
 
     const isCloud =
       databaseUrl.includes("sslmode=require") ||
@@ -45,3 +45,4 @@ export async function query<T = any>(
   const res = await p.query(text, params);
   return res.rows as T[];
 }
+

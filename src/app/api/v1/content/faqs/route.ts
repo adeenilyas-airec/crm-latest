@@ -2,15 +2,19 @@ import { NextResponse } from "next/server";
 import { getFaqs, saveFaq, deleteFaq } from "@/lib/db";
 import { z } from "zod";
 
-const faqSchema = z.object({
-  brand: z.enum(["airec", "metamindful"]),
-  question: z.string().min(5),
-  answer: z.string().min(5),
-  location: z.string().optional(),
-  serviceSlug: z.string().optional(),
-  vectorTag: z.string().optional(),
-  sortOrder: z.number().optional(),
-});
+const faqSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    brand: z.enum(["airec", "metamindful"]),
+    question: z.string().min(1, "Question cannot be empty"),
+    answer: z.string().min(1, "Answer cannot be empty"),
+    location: z.string().optional(),
+    serviceSlug: z.string().optional(),
+    vectorTag: z.string().optional(),
+    sortOrder: z.number().optional(),
+    isVisible: z.boolean().optional(),
+  })
+  .passthrough();
 
 export async function GET(req: Request) {
   try {
@@ -18,7 +22,10 @@ export async function GET(req: Request) {
     const brand = (searchParams.get("brand") as any) || undefined;
     const serviceSlug = searchParams.get("serviceSlug") || undefined;
     const faqs = await getFaqs(brand, serviceSlug);
-    return NextResponse.json({ success: true, count: faqs.length, data: faqs });
+    return NextResponse.json(
+      { success: true, count: faqs.length, data: faqs },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   } catch (error) {
     console.error("[API FAQs GET Error]", error);
     return NextResponse.json({ success: false, error: "Failed to fetch FAQs" }, { status: 500 });
@@ -34,7 +41,7 @@ export async function POST(req: Request) {
     }
 
     const saved = await saveFaq(body);
-    return NextResponse.json({ success: true, data: saved }, { status: 201 });
+    return NextResponse.json({ success: true, data: saved }, { status: 200 });
   } catch (error) {
     console.error("[API FAQs POST Error]", error);
     return NextResponse.json({ success: false, error: "Failed to save FAQ" }, { status: 500 });

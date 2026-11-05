@@ -127,3 +127,4 @@ export async function saveDbPrivacyPolicy(doc: LegalDocument): Promise<LegalDocu
 
   return doc;
 }
+

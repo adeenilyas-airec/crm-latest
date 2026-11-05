@@ -66,14 +66,14 @@ export default function CRMMainPage() {
         legalRes,
         inquiriesRes,
       ] = await Promise.all([
-        fetch(`/api/v1/metrics?brand=${brand}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/v1/metrics?brand=${brand}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
         fetch("/api/v1/content/blogs", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
-        fetch("/api/v1/interactions/comments").then((r) => r.json()).catch(() => null),
-        fetch("/api/v1/compliance/delete-account").then((r) => r.json()).catch(() => null),
-        fetch("/api/v1/content/services").then((r) => r.json()).catch(() => null),
-        fetch(`/api/v1/content/faqs?brand=${brand}`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/v1/content/legal?brand=${brand}`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/v1/leads/inquiry?brand=${brand}`).then((r) => r.json()).catch(() => null),
+        fetch("/api/v1/interactions/comments", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch("/api/v1/compliance/delete-account", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch("/api/v1/content/services", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/v1/content/faqs?brand=${brand}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/v1/content/legal?brand=${brand}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/v1/leads/inquiry?brand=${brand}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
       ]);
 
       if (metricsRes?.metrics) setMetrics(metricsRes.metrics);
@@ -244,12 +244,23 @@ export default function CRMMainPage() {
   };
 
   const handleSaveFaq = async (faq: Partial<FAQItem> & { question: string; answer: string; brand: TenantBrand }) => {
+    // Optimistically update FAQ table immediately
+    setFaqs((prev) =>
+      prev.map((f) => (f.id === faq.id || (faq.question && f.question === faq.question) ? { ...f, ...faq } : f))
+    );
+
     const res = await fetch("/api/v1/content/faqs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(faq),
     });
     if (res.ok) {
+      const result = await res.json().catch(() => null);
+      if (result?.data) {
+        setFaqs((prev) =>
+          prev.map((f) => (f.id === result.data.id || (result.data.id && String(f.id) === String(result.data.id)) ? { ...f, ...result.data } : f))
+        );
+      }
       fetchData();
     }
   };
@@ -265,12 +276,23 @@ export default function CRMMainPage() {
   };
 
   const handleSaveLegalDoc = async (doc: LegalDocument) => {
+    // Optimistically update Legal Documents immediately
+    setLegalDocs((prev) =>
+      prev.map((d) => (d.id === doc.id || (d.brand === doc.brand && d.type === doc.type) ? doc : d))
+    );
+
     const res = await fetch("/api/v1/content/legal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc),
     });
     if (res.ok) {
+      const result = await res.json().catch(() => null);
+      if (result?.data) {
+        setLegalDocs((prev) =>
+          prev.map((d) => (d.id === result.data.id || (d.brand === result.data.brand && d.type === result.data.type) ? result.data : d))
+        );
+      }
       fetchData();
     }
   };
