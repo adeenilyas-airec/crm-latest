@@ -64,14 +64,23 @@ export function BlogsView({ blogs, onSaveBlog, onLikeBlog }: BlogsViewProps) {
 
   const categories = ["all", ...Array.from(new Set(blogs.map((b) => b.category)))];
 
-  const filtered = blogs.filter((b) => {
-    const matchesSearch =
-      b.title.toLowerCase().includes(search.toLowerCase()) ||
-      b.slug.toLowerCase().includes(search.toLowerCase()) ||
-      b.category.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = selectedCategory === "all" || b.category.toLowerCase() === selectedCategory.toLowerCase();
-    return matchesSearch && matchesCat;
-  });
+  const filtered = blogs
+    .filter((b) => {
+      const matchesSearch =
+        b.title.toLowerCase().includes(search.toLowerCase()) ||
+        b.slug.toLowerCase().includes(search.toLowerCase()) ||
+        b.category.toLowerCase().includes(search.toLowerCase());
+      const matchesCat = selectedCategory === "all" || b.category.toLowerCase() === selectedCategory.toLowerCase();
+      return matchesSearch && matchesCat;
+    })
+    .sort((a, b) => {
+      const timeA = new Date(a.publishedAt).getTime();
+      const timeB = new Date(b.publishedAt).getTime();
+      if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return Number(a.id) - Number(b.id);
+    });
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -54,7 +54,9 @@ function mapRowToBlogPost(row: Record<string, any>): BlogPost {
 export async function getDbBlogs(): Promise<BlogPost[]> {
   if (!isDatabaseConfigured()) return [];
 
-  const rows = await query<any>("SELECT * FROM blog_posts ORDER BY id DESC");
+  const rows = await query<any>(
+    "SELECT * FROM blog_posts ORDER BY COALESCE(published_date, created_at) DESC, id ASC"
+  );
   return rows.map(mapRowToBlogPost);
 }
 

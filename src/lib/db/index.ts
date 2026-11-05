@@ -119,6 +119,16 @@ export async function getBlogs(category?: string): Promise<BlogPost[]> {
     list = list.filter((b) => b.category.toLowerCase() === category.toLowerCase());
   }
 
+  // Sort descending by publication date
+  list.sort((a, b) => {
+    const timeA = new Date(a.publishedAt).getTime();
+    const timeB = new Date(b.publishedAt).getTime();
+    if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+      return timeB - timeA;
+    }
+    return Number(a.id) - Number(b.id);
+  });
+
   return list;
 }
 
