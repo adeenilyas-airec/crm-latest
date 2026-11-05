@@ -1,4 +1,8 @@
 import initialDataBundle from "@/lib/seed/initialData.json";
+import { isDatabaseConfigured } from "@/lib/db/postgres";
+import { getDbBlogs, getDbBlogBySlug, saveDbBlog, deleteDbBlog } from "@/lib/db/blogs";
+import { getDbFaqs, saveDbFaq, deleteDbFaq } from "@/lib/db/faqs";
+import { getDbPrivacyPolicy, saveDbPrivacyPolicy } from "@/lib/db/privacy";
 import {
   fetchLiveWordPressBlogs,
   fetchLiveWordPressBlogBySlug,
@@ -73,9 +77,26 @@ if (!globalStore.__CRM_STORE__) {
 
 const store = globalStore.__CRM_STORE__;
 
-/* ─── BLOGS (LIVE FROM WORDPRESS REST API) ───────────────────────────── */
+/* ─── BLOGS (LIVE FROM POSTGRESQL DATABASE & WORDPRESS FALLBACK) ──────── */
 export async function getBlogs(category?: string): Promise<BlogPost[]> {
-  const livePosts = await fetchLiveWordPressBlogs();
+  let livePosts: BlogPost[] = [];
+
+  // 1. Primary: Read from PostgreSQL database
+  if (isDatabaseConfigured()) {
+    try {
+      const dbPosts = await getDbBlogs();
+      if (dbPosts.length > 0) {
+        livePosts = dbPosts;
+      }
+    } catch (dbErr) {
+      console.warn("[PostgreSQL Blog Read Notice]:", (dbErr as Error).message);
+    }
+  }
+
+  // 2. Fallback: WordPress REST API if DB is not configured or unseeded
+  if (livePosts.length === 0) {
+    livePosts = await fetchLiveWordPressBlogs();
+  }
 
   const deletedSlugs = store.deletedBlogSlugs || (store.deletedBlogSlugs = new Set());
   const overrides = store.blogOverrides || (store.blogOverrides = new Map());
@@ -110,7 +131,22 @@ export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
     return null;
   }
 
-  const livePost = await fetchLiveWordPressBlogBySlug(slug);
+  let livePost: BlogPost | null = null;
+
+  // 1. Primary: Read from PostgreSQL database
+  if (isDatabaseConfigured()) {
+    try {
+      livePost = await getDbBlogBySlug(slug);
+    } catch (dbErr) {
+      console.warn("[PostgreSQL Blog Slug Notice]:", (dbErr as Error).message);
+    }
+  }
+
+  // 2. Fallback: WordPress REST API
+  if (!livePost) {
+    livePost = await fetchLiveWordPressBlogBySlug(slug);
+  }
+
   if (!livePost) return null;
 
   const override = overrides.get(slug) || overrides.get(livePost.id);
@@ -125,54 +161,64 @@ export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
 
 export async function saveBlog(blog: Partial<BlogPost> & { title: string; slug: string }): Promise<BlogPost> {
   const now = new Date().toISOString();
-  const existing = await getBlogBySlug(blog.slug);
-
-  // 1. Live write to WordPress REST API
-  const wpPostId = blog.id || existing?.id;
   let liveUpdatedPost: BlogPost | null = null;
 
-  if (wpPostId && !isNaN(Number(wpPostId))) {
+  // 1. Direct PostgreSQL Write (Primary Modern Storage)
+  if (isDatabaseConfigured()) {
     try {
-      liveUpdatedPost = await updateWordPressPost(wpPostId, {
-        title: blog.title,
-        description: blog.description,
-        content: blog.content,
-        status: blog.status,
-      });
-      console.log(`[WordPress REST API] Successfully updated post ${wpPostId} live!`);
-    } catch (wpErr) {
-      console.error(`[WordPress Live Update Error on post ${wpPostId}]:`, wpErr);
-    }
-  } else if (!existing) {
-    try {
-      liveUpdatedPost = await createWordPressPost({
-        title: blog.title,
-        description: blog.description,
-        content: blog.content,
-        status: blog.status,
-      });
-      console.log(`[WordPress REST API] Successfully created new post live! ID: ${liveUpdatedPost.id}`);
-    } catch (wpErr) {
-      console.error("[WordPress Live Create Error]:", wpErr);
+      liveUpdatedPost = await saveDbBlog(blog);
+      console.log(`[PostgreSQL DB] Successfully saved blog '${blog.slug}' live!`);
+    } catch (dbErr) {
+      console.warn("[PostgreSQL Blog Save Error]:", dbErr);
     }
   }
 
-  // Trigger instant on-demand revalidation on deployed MetaMindful website
+  // 2. Backup write to WordPress REST API if database is unconfigured
+  if (!liveUpdatedPost) {
+    const existing = await getBlogBySlug(blog.slug);
+    const wpPostId = blog.id || existing?.id;
+
+    if (wpPostId && !isNaN(Number(wpPostId))) {
+      try {
+        liveUpdatedPost = await updateWordPressPost(wpPostId, {
+          title: blog.title,
+          description: blog.description,
+          content: blog.content,
+          status: blog.status,
+        });
+        console.log(`[WordPress REST API] Successfully updated post ${wpPostId} live!`);
+      } catch (wpErr) {
+        console.error(`[WordPress Live Update Error on post ${wpPostId}]:`, wpErr);
+      }
+    } else if (!existing) {
+      try {
+        liveUpdatedPost = await createWordPressPost({
+          title: blog.title,
+          description: blog.description,
+          content: blog.content,
+          status: blog.status,
+        });
+        console.log(`[WordPress REST API] Successfully created new post live! ID: ${liveUpdatedPost.id}`);
+      } catch (wpErr) {
+        console.error("[WordPress Live Create Error]:", wpErr);
+      }
+    }
+  }
+
+  // 3. Trigger instant on-demand revalidation on deployed MetaMindful website
   try {
     const mmUrl = process.env.METAMINDFUL_SITE_URL || "https://metamindful-latest.vercel.app";
-    const secret = process.env.REVALIDATION_SECRET || "metamindful_crm_sync_secret_2026";
+    const secret = process.env.REVALIDATION_SECRET || "metamindful-secret-revalidate-token";
     fetch(`${mmUrl}/api/revalidate?secret=${secret}&slug=${encodeURIComponent(blog.slug)}`, {
       method: "POST",
-    })
-      .then((r) => r.json())
-      .then((res) => console.log(`[MetaMindful Revalidation] Purged cache on ${mmUrl}:`, res))
-      .catch((err) => console.warn(`[MetaMindful Revalidation Notice]:`, err.message));
+    }).catch(() => null);
   } catch (revalErr) {
     console.warn("[Revalidation Error]:", revalErr);
   }
 
-  // 2. Merge with CRM session state
-  const base = liveUpdatedPost || existing;
+  // 4. Merge with CRM session state
+  const existingPost = await getBlogBySlug(blog.slug);
+  const base = liveUpdatedPost || existingPost;
   const updated: BlogPost = {
     ...(base || {
       id: blog.id || `blog_${Date.now()}`,
@@ -223,7 +269,17 @@ export async function deleteBlog(idOrSlug: string): Promise<boolean> {
   const deletedSlugs = store.deletedBlogSlugs || (store.deletedBlogSlugs = new Set());
   deletedSlugs.add(idOrSlug);
 
-  // If numeric or matched post has numeric ID, delete in WordPress
+  // 1. Delete from PostgreSQL
+  if (isDatabaseConfigured()) {
+    try {
+      await deleteDbBlog(idOrSlug);
+      console.log(`[PostgreSQL DB] Successfully deleted blog '${idOrSlug}' live!`);
+    } catch (dbErr) {
+      console.warn("[PostgreSQL Blog Delete Error]:", dbErr);
+    }
+  }
+
+  // 2. Delete from WordPress if numeric ID
   const targetId = !isNaN(Number(idOrSlug))
     ? idOrSlug
     : (await getBlogBySlug(idOrSlug))?.id;
@@ -234,7 +290,7 @@ export async function deleteBlog(idOrSlug: string): Promise<boolean> {
       console.log(`[WordPress REST API] Successfully deleted post ${targetId} live!`);
 
       const mmUrl = process.env.METAMINDFUL_SITE_URL || "https://metamindful-latest.vercel.app";
-      const secret = process.env.REVALIDATION_SECRET || "metamindful_crm_sync_secret_2026";
+      const secret = process.env.REVALIDATION_SECRET || "metamindful-secret-revalidate-token";
       fetch(`${mmUrl}/api/revalidate?secret=${secret}&slug=${encodeURIComponent(idOrSlug)}`, {
         method: "POST",
       }).catch(() => null);
@@ -367,8 +423,20 @@ export async function saveProduct(product: ProductItem): Promise<ProductItem> {
   return product;
 }
 
-/* ─── FAQS (CROSS-BRAND) ─────────────────────────────────────────────── */
+/* ─── FAQS (CROSS-BRAND & POSTGRESQL SYNC) ─────────────────────────── */
 export async function getFaqs(brand?: TenantBrand, serviceSlug?: string): Promise<FAQItem[]> {
+  // If querying MetaMindful FAQs, read directly from PostgreSQL
+  if (brand === "metamindful" && isDatabaseConfigured()) {
+    try {
+      const dbFaqs = await getDbFaqs();
+      if (dbFaqs.length > 0) {
+        return dbFaqs;
+      }
+    } catch (err) {
+      console.warn("[PostgreSQL FAQ Read Notice]:", (err as Error).message);
+    }
+  }
+
   let list = [...store.faqs];
   if (brand) {
     list = list.filter((f) => f.brand === brand);
@@ -380,6 +448,21 @@ export async function getFaqs(brand?: TenantBrand, serviceSlug?: string): Promis
 }
 
 export async function saveFaq(faq: Partial<FAQItem> & { question: string; answer: string; brand: TenantBrand }): Promise<FAQItem> {
+  // 1. Direct PostgreSQL Write for MetaMindful
+  if (faq.brand === "metamindful" && isDatabaseConfigured()) {
+    try {
+      const saved = await saveDbFaq(faq);
+      console.log(`[PostgreSQL DB] Successfully saved FAQ '${saved.id}' live!`);
+      const idx = store.faqs.findIndex((f) => f.id === saved.id || f.question === saved.question);
+      if (idx >= 0) store.faqs[idx] = saved;
+      else store.faqs.push(saved);
+      return saved;
+    } catch (err) {
+      console.warn("[PostgreSQL FAQ Save Error]:", err);
+    }
+  }
+
+  // 2. Standard Store Save (for AIREC or local fallback)
   const existingIdx = store.faqs.findIndex((f) => f.id === faq.id);
   const now = new Date().toISOString();
 
@@ -411,13 +494,36 @@ export async function saveFaq(faq: Partial<FAQItem> & { question: string; answer
 }
 
 export async function deleteFaq(id: string): Promise<boolean> {
+  if (isDatabaseConfigured()) {
+    try {
+      await deleteDbFaq(id);
+      console.log(`[PostgreSQL DB] Successfully deleted FAQ '${id}' live!`);
+    } catch (err) {
+      console.warn("[PostgreSQL FAQ Delete Error]:", err);
+    }
+  }
+
   const prevCount = store.faqs.length;
   store.faqs = store.faqs.filter((f) => f.id !== id);
   return store.faqs.length < prevCount;
 }
 
-/* ─── LEGAL POLICIES ─────────────────────────────────────────────────── */
+/* ─── LEGAL POLICIES (PRIVACY & TERMS VIA POSTGRESQL) ──────────────── */
 export async function getLegalDocuments(brand?: TenantBrand): Promise<LegalDocument[]> {
+  if ((brand === "metamindful" || !brand) && isDatabaseConfigured()) {
+    try {
+      const dbPrivacy = await getDbPrivacyPolicy();
+      if (dbPrivacy) {
+        const nonDbDocs = store.legalDocuments.filter(
+          (d) => !(d.brand === "metamindful" && d.type === "PRIVACY_POLICY")
+        );
+        store.legalDocuments = [dbPrivacy, ...nonDbDocs];
+      }
+    } catch (err) {
+      console.warn("[PostgreSQL Privacy Read Notice]:", (err as Error).message);
+    }
+  }
+
   let list = [...store.legalDocuments];
   if (brand) {
     list = list.filter((d) => d.brand === brand);
@@ -426,11 +532,34 @@ export async function getLegalDocuments(brand?: TenantBrand): Promise<LegalDocum
 }
 
 export async function getLegalDocument(brand: TenantBrand, type: "PRIVACY_POLICY" | "TERMS_OF_USE"): Promise<LegalDocument | null> {
+  if (brand === "metamindful" && type === "PRIVACY_POLICY" && isDatabaseConfigured()) {
+    try {
+      const dbPrivacy = await getDbPrivacyPolicy();
+      if (dbPrivacy) return dbPrivacy;
+    } catch (err) {
+      console.warn("[PostgreSQL Privacy Read Notice]:", (err as Error).message);
+    }
+  }
+
   const found = store.legalDocuments.find((d) => d.brand === brand && d.type === type);
   return found || null;
 }
 
 export async function saveLegalDocument(doc: LegalDocument): Promise<LegalDocument> {
+  // 1. Direct PostgreSQL Write for MetaMindful Privacy Policy
+  if (doc.brand === "metamindful" && doc.type === "PRIVACY_POLICY" && isDatabaseConfigured()) {
+    try {
+      const saved = await saveDbPrivacyPolicy(doc);
+      console.log(`[PostgreSQL DB] Successfully saved Privacy Policy live!`);
+      const idx = store.legalDocuments.findIndex((d) => d.brand === doc.brand && d.type === doc.type);
+      if (idx >= 0) store.legalDocuments[idx] = saved;
+      else store.legalDocuments.push(saved);
+      return saved;
+    } catch (err) {
+      console.warn("[PostgreSQL Privacy Save Error]:", err);
+    }
+  }
+
   const idx = store.legalDocuments.findIndex((d) => d.brand === doc.brand && d.type === doc.type);
   const updated: LegalDocument = {
     ...doc,

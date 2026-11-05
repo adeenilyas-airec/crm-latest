@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLegalDocuments, getLegalDocument, saveLegalDocument } from "@/lib/firebase/db";
+import { getLegalDocuments, getLegalDocument, saveLegalDocument } from "@/lib/db";
 
 export async function GET(req: Request) {
   try {

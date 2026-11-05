@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getFaqs, saveFaq, deleteFaq } from "@/lib/firebase/db";
+import { getFaqs, saveFaq, deleteFaq } from "@/lib/db";
 import { z } from "zod";
 
 const faqSchema = z.object({

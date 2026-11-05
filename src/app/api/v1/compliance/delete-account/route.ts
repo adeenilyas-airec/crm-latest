@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createDeletion, getDeletions } from "@/lib/firebase/db";
+import { createDeletion, getDeletions } from "@/lib/db";
 import { z } from "zod";
 
 const deletionSchema = z.object({

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBlogs, saveBlog } from "@/lib/firebase/db";
+import { getBlogs, saveBlog } from "@/lib/db";
 import { z } from "zod";
 
 const blogSchema = z.object({

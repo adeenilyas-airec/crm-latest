@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createInquiry, getInquiries, updateInquiryStatus } from "@/lib/firebase/db";
+import { createInquiry, getInquiries, updateInquiryStatus } from "@/lib/db";
 import { z } from "zod";
 import type { TenantBrand, InquiryStatus } from "@/types/crm";
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServices, saveService } from "@/lib/firebase/db";
+import { getServices, saveService } from "@/lib/db";
 import { z } from "zod";
 
 const serviceSchema = z.object({

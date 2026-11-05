@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCRMMetrics } from "@/lib/firebase/db";
+import { getCRMMetrics } from "@/lib/db";
 import type { TenantBrand } from "@/types/crm";
 
 export async function GET(req: Request) {

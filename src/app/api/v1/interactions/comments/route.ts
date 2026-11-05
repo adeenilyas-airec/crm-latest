@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getComments, addComment, updateCommentStatus } from "@/lib/firebase/db";
+import { getComments, addComment, updateCommentStatus } from "@/lib/db";
 import { z } from "zod";
 
 const commentSchema = z.object({
