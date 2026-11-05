@@ -63,9 +63,9 @@ if (!globalStore.__CRM_STORE__) {
     airecProducts: (initialDataBundle.airecProducts || []) as unknown as ProductItem[],
     faqs: [
       ...((initialDataBundle.airecFaqs || []) as unknown as FAQItem[]),
-      ...((initialDataBundle.metamindfulFaqs || []) as unknown as FAQItem[])
+      /* MetaMindful FAQs strictly loaded from PostgreSQL database */
     ],
-    legalDocuments: (initialDataBundle.legalDocuments || []) as unknown as LegalDocument[],
+    legalDocuments: ((initialDataBundle.legalDocuments || []) as unknown as LegalDocument[]).filter((d) => !(d.brand === "metamindful" && d.type === "PRIVACY_POLICY")),
     comments: (initialDataBundle.sampleComments || []) as unknown as BlogComment[],
     inquiries: initialInquiries,
     deletions: (initialDataBundle.sampleDeletions || []) as unknown as DeletionRequest[],
@@ -426,15 +426,15 @@ export async function saveProduct(product: ProductItem): Promise<ProductItem> {
 /* ─── FAQS (CROSS-BRAND & POSTGRESQL SYNC) ─────────────────────────── */
 export async function getFaqs(brand?: TenantBrand, serviceSlug?: string): Promise<FAQItem[]> {
   // If querying MetaMindful FAQs, read directly from PostgreSQL
-  if (brand === "metamindful" && isDatabaseConfigured()) {
-    try {
-      const dbFaqs = await getDbFaqs();
-      if (dbFaqs.length > 0) {
-        return dbFaqs;
+  if (brand === "metamindful") {
+    if (isDatabaseConfigured()) {
+      try {
+        return await getDbFaqs();
+      } catch (err) {
+        console.warn("[PostgreSQL FAQ Read Notice]:", (err as Error).message);
       }
-    } catch (err) {
-      console.warn("[PostgreSQL FAQ Read Notice]:", (err as Error).message);
     }
+    return [];
   }
 
   let list = [...store.faqs];
@@ -510,18 +510,19 @@ export async function deleteFaq(id: string): Promise<boolean> {
 
 /* ─── LEGAL POLICIES (PRIVACY & TERMS VIA POSTGRESQL) ──────────────── */
 export async function getLegalDocuments(brand?: TenantBrand): Promise<LegalDocument[]> {
-  if ((brand === "metamindful" || !brand) && isDatabaseConfigured()) {
-    try {
-      const dbPrivacy = await getDbPrivacyPolicy();
-      if (dbPrivacy) {
-        const nonDbDocs = store.legalDocuments.filter(
-          (d) => !(d.brand === "metamindful" && d.type === "PRIVACY_POLICY")
-        );
-        store.legalDocuments = [dbPrivacy, ...nonDbDocs];
+  if (brand === "metamindful") {
+    let dbPrivacy: LegalDocument | null = null;
+    if (isDatabaseConfigured()) {
+      try {
+        dbPrivacy = await getDbPrivacyPolicy();
+      } catch (err) {
+        console.warn("[PostgreSQL Privacy Read Notice]:", (err as Error).message);
       }
-    } catch (err) {
-      console.warn("[PostgreSQL Privacy Read Notice]:", (err as Error).message);
     }
+    const metaTerms = store.legalDocuments.filter(
+      (d) => d.brand === "metamindful" && d.type === "TERMS_OF_USE"
+    );
+    return dbPrivacy ? [dbPrivacy, ...metaTerms] : metaTerms;
   }
 
   let list = [...store.legalDocuments];
